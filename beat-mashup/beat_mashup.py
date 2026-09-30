@@ -61,7 +61,12 @@ HOP = 256                      # samples per analysis hop (~23 ms)
 # --------------------------------------------------------------------------- helpers
 def log(*args):
     print('[beat mashup]', *args)
-    sys.stdout.flush()
+    flush = getattr(sys.stdout, 'flush', None)
+    if callable(flush):
+        try:
+            flush()
+        except Exception:
+            pass
 
 
 def to_float(value, default=0.0):
@@ -168,9 +173,25 @@ def find_timeline(project, name):
 
 
 # --------------------------------------------------------------------------- audio analysis
+def find_ffmpeg(hint=''):
+    if hint and os.path.exists(hint):
+        return hint
+    for candidate in (
+        hint,
+        shutil.which('ffmpeg'),
+        shutil.which('ffmpeg.exe'),
+        '/opt/homebrew/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        os.path.expanduser('~/bin/ffmpeg'),
+    ):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def decode_mono(path, ffmpeg_hint=''):
     """Returns (samples as array('h'), sample rate)."""
-    ffmpeg = ffmpeg_hint or shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
+    ffmpeg = find_ffmpeg(ffmpeg_hint)
     if ffmpeg:
         flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
         proc = subprocess.run([ffmpeg, '-v', 'error', '-i', path, '-f', 's16le', '-ac', '1', '-ar', str(SR), '-'],
@@ -534,18 +555,29 @@ def ask_options(ui, disp, cfg, info):
 
 
 def show_message(ui, disp, title, text):
-    if ui is None:
-        return
+    if ui is not None and disp is not None:
+        try:
+            win = disp.AddWindow({'ID': 'BeatMsg', 'WindowTitle': title, 'Geometry': [340, 260, 420, 180]}, [
+                ui.VGroup([ui.Label({'Text': text, 'WordWrap': True}),
+                           ui.Button({'ID': 'ok', 'Text': 'OK', 'Weight': 0})]),
+            ])
+            win.On.ok.Clicked = lambda ev: disp.ExitLoop()
+            win.On.BeatMsg.Close = lambda ev: disp.ExitLoop()
+            win.Show()
+            disp.RunLoop()
+            win.Hide()
+            return
+        except Exception:
+            pass
+    # Fallback when Resolve UIManager is not available (e.g. Free version)
     try:
-        win = disp.AddWindow({'ID': 'BeatMsg', 'WindowTitle': title, 'Geometry': [340, 260, 420, 180]}, [
-            ui.VGroup([ui.Label({'Text': text, 'WordWrap': True}),
-                       ui.Button({'ID': 'ok', 'Text': 'OK', 'Weight': 0})]),
-        ])
-        win.On.ok.Clicked = lambda ev: disp.ExitLoop()
-        win.On.BeatMsg.Close = lambda ev: disp.ExitLoop()
-        win.Show()
-        disp.RunLoop()
-        win.Hide()
+        if sys.platform == 'darwin':
+            safe_text = str(text).replace('\\', '\\\\').replace('"', '\\"')
+            safe_title = str(title).replace('\\', '\\\\').replace('"', '\\"')
+            subprocess.run(['osascript', '-e', f'display dialog "{safe_text}" with title "{safe_title}" buttons {{"OK"}} default button "OK"'], check=False)
+        elif sys.platform.startswith('win'):
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, str(text), str(title), 0)
     except Exception:
         pass
 
@@ -717,6 +749,7 @@ def main():
     resolve = get_resolve()
     if resolve is None:
         log('Cannot find Resolve. Run this from Workspace > Scripts inside DaVinci Resolve.')
+        show_message(None, None, 'Beat mashup', 'Cannot find Resolve. Run this from Workspace > Scripts inside DaVinci Resolve.')
         return
     ui, disp = get_ui(resolve) if CONFIG.get('show_dialog') else (None, None)
     try:
@@ -726,6 +759,11 @@ def main():
     except Abort as e:
         log('ERROR:', e)
         show_message(ui, disp, 'Beat mashup', str(e))
+    except Exception as e:
+        import traceback
+        err_msg = traceback.format_exc()
+        log('ERROR: unexpected exception:\n', err_msg)
+        show_message(ui, disp, 'Beat mashup', f'Unexpected error:\n{e}')
 
 
 if __name__ == '__main__' or 'resolve' in globals() or 'app' in globals():

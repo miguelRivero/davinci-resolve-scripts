@@ -27,7 +27,12 @@ CONFIG = {
 # --------------------------------------------------------------------------- helpers
 def log(*args):
     print('[my script]', *args)
-    sys.stdout.flush()
+    flush = getattr(sys.stdout, 'flush', None)
+    if callable(flush):
+        try:
+            flush()
+        except Exception:
+            pass
 
 
 class Abort(Exception):

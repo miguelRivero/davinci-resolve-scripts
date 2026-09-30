@@ -123,15 +123,50 @@ After `git pull` in **this repository** or a change in a **script folder**, run 
 
 Installing only copies files. You run the script **inside Resolve**, on an open project.
 
-1. **Quit and reopen DaVinci Resolve** so it reloads **Workspace → Scripts** (do this after every install or update).
+**Workspace** is not a page button (Cut / Edit / Fusion / Color / Fairlight / Deliver). It is a menu in the **application menu bar**:
+
+- **macOS:** the bar at the **top of the screen** (File, Edit, …, **Workspace**, …). If Resolve is full screen or the menu bar is set to auto-hide, move the pointer to the top of the display. Click the Resolve window first so the menus belong to Resolve, not Finder.
+- **Windows:** the bar at the **top of the Resolve window** (File, Edit, …, **Workspace**, …).
+
+In that same **Workspace** menu you should also see **Console**. If you see Console, you have the right menu. **Scripts** is the item next to it. Resolve only fills Scripts when it **starts**, after files exist in the Resolve scripts folder.
+
+1. Run `tools/install.py` from **this repository**, then **quit Resolve completely** (macOS: DaVinci Resolve → Quit) and open it again.
 2. Open (or create) a project. Scripts act on the **current** project, Media Pool bin, and timeline — not on this Git repository.
 3. Prepare media the way that script’s README describes (beat-mashup: select a Media Pool **bin** of videos and import a song).
-4. Run it: **Workspace → Scripts →** the `.py` name (`beat_mashup`, not the folder name `beat-mashup`). Utility scripts appear on every page; Edit / Color / Deliver / Comp scripts only on that page.
-5. If a options window appears, set values and confirm. If your Resolve build has no UI for scripts, it uses `CONFIG` at the top of the `.py`.
+4. **Workspace → Scripts → beat_mashup** (the `.py` name, not the folder `beat-mashup`). Utility scripts appear on every page; Edit / Color / Deliver / Comp scripts only on that page.
+5. If an options window appears, set values and confirm. If your Resolve build has no UI for scripts, it uses `CONFIG` at the top of the `.py`.
 6. Read log lines in **Workspace → Console** (detected BPM, errors, seed, and so on).
 7. Check the timeline the script created or updated, then continue editing or export from **Deliver**.
 
-You do **not** run `beat_mashup.py` from the terminal for normal use. The terminal is for Git and `tools/install.py` only.
+You do **not** run `beat_mashup.py` from the terminal for a normal edit. The terminal is for Git and `tools/install.py` only.
+
+### If Scripts is missing or says “No Scripts”
+
+1. Confirm the installer copied a file. From the root of **this repository**:
+
+   **Windows (PowerShell)**
+
+   ```powershell
+   python tools\install.py --list
+   explorer "$env:APPDATA\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility"
+   ```
+
+   **macOS (Terminal)**
+
+   ```sh
+   python3 tools/install.py --list
+   open "$HOME/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility"
+   ```
+
+   You should see `beat_mashup.py` in that Utility folder. If `--list` prints nothing useful, you were not in `davinci-resolve-scripts/` (the folder that contains `tools/`).
+
+2. Fully quit and reopen Resolve. Dropping a file in while Resolve is open does not refresh the menu.
+
+3. **DaVinci Resolve → Preferences → System → General** (Windows: **File → Preferences**): set **External scripting using** to **Local**, not **None**. Apply, then restart Resolve.
+
+4. If the whole top menu bar looks wrong: **Workspace → Reset UI Layout**.
+
+5. 64-bit Python 3 from [python.org](https://www.python.org/downloads/) must be installed **before** Resolve will run a `.py`. The menu can still list the script if the file is in place.
 
 Details, options, and limits for each tool: that **script folder’s** README, e.g. [beat-mashup/README.md](beat-mashup/README.md).
 

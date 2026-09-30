@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Copia los scripts de este repo a la carpeta de scripts de DaVinci Resolve.
+Copy scripts from this Git repository into DaVinci Resolve's scripts folder.
 
-  python tools/install.py              instala (o actualiza) todos los scripts
-  python tools/install.py --list       muestra qué se instalaría y dónde
-  python tools/install.py --uninstall  quita los scripts de este repo de Resolve
-  python tools/install.py --dest DIR   usa otra carpeta de scripts
+  python tools/install.py              install (or update) every script
+  python tools/install.py --list       show what would be installed and where
+  python tools/install.py --uninstall  remove this repository's scripts from Resolve
+  python tools/install.py --dest DIR   use another scripts folder
 
-Cada script va al menú que indique su cabecera con una línea
-"# resolve-menu: Utility" (Utility, Edit, Color, Deliver o Comp). Sin ella va a
-Utility, que aparece en todas las páginas. Vuelve a ejecutarlo después de
-cambiar o actualizar un script; reinicia Resolve si no aparece en el menú.
+Each script goes to the menu named in its header by a line
+"# resolve-menu: Utility" (Utility, Edit, Color, Deliver, or Comp). Without it
+it goes to Utility, which appears on every page. Run this again after you
+change or update a script; restart Resolve if it does not show in the menu.
 """
 import argparse
 import os
@@ -43,7 +43,7 @@ def menu_of(path):
     for menu in MENUS:
         if menu.lower() == wanted:
             return menu
-    print('  aviso: menú "%s" desconocido en %s, uso Utility' % (m.group(1), path.name))
+    print('  warning: unknown menu "%s" in %s, using Utility' % (m.group(1), path.name))
     return 'Utility'
 
 
@@ -59,21 +59,21 @@ def find_scripts():
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--dest', help='carpeta Scripts de Resolve (por defecto la del usuario)')
-    ap.add_argument('--list', action='store_true', help='solo mostrar lo que se haría')
-    ap.add_argument('--uninstall', action='store_true', help='quitar los scripts de este repo')
+    ap.add_argument('--dest', help='Resolve Scripts folder (default: the user folder)')
+    ap.add_argument('--list', action='store_true', help='only print what would be done')
+    ap.add_argument('--uninstall', action='store_true', help='remove this repository\'s scripts from Resolve')
     args = ap.parse_args()
 
     root = Path(args.dest).expanduser() if args.dest else scripts_root()
     scripts = list(find_scripts())
     if not scripts:
-        print('No hay scripts en', REPO)
+        print('No scripts in', REPO)
         return 1
-    print('Carpeta de scripts de Resolve:', root)
+    print('Resolve scripts folder:', root)
     names = {}
     for src, menu in scripts:
         if src.name in names:
-            print('ERROR: dos scripts se llaman %s (%s y %s); cambia uno de nombre.'
+            print('ERROR: two scripts are named %s (%s and %s); rename one.'
                   % (src.name, names[src.name].parent.name, src.parent.name))
             return 1
         names[src.name] = src
@@ -86,16 +86,16 @@ def main():
         elif args.uninstall:
             if dst.exists():
                 dst.unlink()
-                print('  quitado   ', dst)
+                print('  removed   ', dst)
             else:
-                print('  no estaba ', dst)
+                print('  missing   ', dst)
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             existed = dst.exists()
             shutil.copy2(str(src), str(dst))
-            print('  %s %s -> %s' % ('actualizado' if existed else 'instalado  ', rel, menu))
+            print('  %s %s -> %s' % ('updated   ' if existed else 'installed ', rel, menu))
     if not args.list and not args.uninstall:
-        print('Listo. En Resolve: Workspace > Scripts (reinicia Resolve si no aparecen).')
+        print('Done. In Resolve: Workspace > Scripts (restart Resolve if they do not appear).')
     return 0
 
 

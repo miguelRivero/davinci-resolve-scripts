@@ -1,81 +1,85 @@
-# Beat mashup para DaVinci Resolve
+# Beat mashup for DaVinci Resolve
 
-`beat_mashup.py` trocea al azar los vídeos de una carpeta del Media Pool y los monta a ritmo
-sobre una canción, listo para exportar como videoclip.
+`beat_mashup.py` randomly slices videos from a Media Pool **bin** and cuts them to a song, ready to export as a music video.
 
-- Cada corte empieza en un beat y dura 1, 2 o 4 beats, elegidos al azar con pesos 45 / 35 / 20. Los de 2
-  y 4 beats solo empiezan donde encajan con el compás, así que en la práctica salen más cortes de 1 beat.
-- El BPM lo escribes tú o se detecta de la canción que tengas en el Media Pool. También detecta dónde
-  cae el primer beat.
-- El mismo vídeo nunca sale dos veces seguidas, y el script intenta no repetir el mismo trozo.
-- Cada vez que lo ejecutas sale un montaje distinto. Si quieres repetir uno, usa su semilla.
+- Each cut starts on a beat and lasts 1, 2, or 4 beats, chosen at random with weights 45 / 35 / 20. 2- and 4-beat cuts only start where they fit the bar, so you get more 1-beat cuts in practice.
+- You type the BPM or it is detected from the song in the Media Pool. The first beat is detected as well.
+- The same video is never used twice in a row, and the script tries not to reuse the same stretch of a clip.
+- Each run is a different edit. To repeat one, reuse its seed.
 
-## Tus FX se conservan
+How to clone **this repository**, install Python, and copy the `.py` into Resolve: [root README](../README.md). That file also covers **Workspace → Scripts** and the Console.
 
-El script solo reescribe **V1** (los cortes) y **A1** (la canción) de su timeline, que por defecto se
-llama *Beat mashup*. Pon tus filtros y efectos en **adjustment clips en V2 o más arriba**, y los
-títulos, overlays o sonidos extra en V2+ y A2+. Al volver a generar el montaje todo eso se queda como
-está, y tus marcadores también.
+## Your FX are kept
 
-No pongas efectos directamente en los cortes de V1: se rehacen cada vez.
+The script only rewrites **V1** (cuts) and **A1** (the song) on **its** timeline, named *Beat mashup* by default. Put filters on **adjustment clips on V2 or above**, and titles, overlays, or extra sound on V2+ / A2+. Regenerating leaves those (and your markers) in place.
 
-El timeline lleva un marcador color crema llamado *Beat mashup*, con el BPM y la semilla usados. El
-script lo usa para saber que ese timeline es suyo. Si lo borras, no volverá a tocar ese timeline.
-Tampoco toca nunca un timeline con el mismo nombre que no haya creado él.
+Do not put effects on the V1 cuts themselves: they are rebuilt every run.
 
-## Instalación
+The timeline has a cream marker named *Beat mashup* with the BPM and seed. The script uses it to recognize its own timeline. If you delete that marker, it will not touch that timeline again. It never edits a timeline with the same name that it did not create.
 
-1. Instala **Python 3 de 64 bits** desde [python.org](https://www.python.org/downloads/) si no lo tienes.
-   Resolve lo necesita para los scripts `.py`.
-2. Desde la raíz del repo, ejecuta `python tools/install.py`. Copia el script a la carpeta de scripts
-   de Resolve (en Windows, `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility`).
-   También puedes copiar `beat_mashup.py` ahí a mano.
-3. Opcional: **ffmpeg** en el PATH, para detectar el BPM de MP3, M4A o AIFF. Con WAV no hace falta.
-   Si ffmpeg no está en el PATH, pon su ruta en `CONFIG['ffmpeg']`.
-4. Opcional: `pip install numpy`, que acelera el análisis.
-5. Reinicia Resolve. El script aparece en **Workspace → Scripts → beat_mashup**.
+## Install
 
-## Uso
+1. Install **64-bit Python 3** from [python.org](https://www.python.org/downloads/) if you do not have it. Resolve needs it to run `.py` scripts from the menu.
+2. In the **root of this repository** (`davinci-resolve-scripts/`, the folder that contains `tools/` and `beat-mashup/`), not in the Resolve scripts folder:
 
-1. Crea una carpeta en el Media Pool con los vídeos que quieras mezclar y **ábrela** (selecciónala).
-2. Importa la canción al Media Pool. Puede estar en esa carpeta o en cualquier otra.
-3. **Workspace → Scripts → beat_mashup**. Sale una ventana con las opciones; si tu Resolve no la
-   muestra, el script usa los valores de `CONFIG`, al principio del archivo.
-4. Revisa el timeline, añade tus FX en V2+ y exporta desde **Deliver**.
-5. ¿No te gusta el montaje? Vuelve a ejecutarlo: los cortes cambian y tus FX se quedan.
+   **Windows (PowerShell)**
 
-Los mensajes y el BPM detectado aparecen en **Workspace → Console**.
+   ```powershell
+   cd path\to\davinci-resolve-scripts
+   python tools\install.py
+   ```
 
-## Opciones
+   **macOS (Terminal)**
 
-| Opción | Qué hace |
+   ```sh
+   cd /path/to/davinci-resolve-scripts
+   python3 tools/install.py
+   ```
+
+   That copies `beat-mashup/beat_mashup.py` into the **Resolve scripts folder**, Utility menu:
+
+   | OS | Destination |
+   |---|---|
+   | Windows | `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility\beat_mashup.py` |
+   | macOS | `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/beat_mashup.py` |
+
+   You can copy `beat_mashup.py` there by hand instead.
+3. Optional: **ffmpeg** on PATH, to detect BPM from MP3, M4A, or AIFF. WAV does not need it. If ffmpeg is not on PATH, set its path in `CONFIG['ffmpeg']`.
+4. Optional: `pip install numpy` (Windows) or `python3 -m pip install numpy` (macOS), which speeds up analysis.
+5. Quit and reopen Resolve. The script appears under **Workspace → Scripts → beat_mashup**.
+
+## Use it in DaVinci Resolve
+
+1. Open a project. In the Media Pool, create a **bin** with the videos to mash up and **open / select that bin** (it must be the current folder).
+2. Import the song into the Media Pool. It can live in that bin or anywhere else in the pool.
+3. **Workspace → Scripts → beat_mashup**. An options window appears; if your Resolve build does not show it, the script uses `CONFIG` at the top of the file.
+4. Review the *Beat mashup* timeline, add FX on V2+, export from **Deliver**.
+5. Do not like the edit? Run the script again: cuts change, your FX stay.
+
+Logs and detected BPM: **Workspace → Console**.
+
+Do not run `beat_mashup.py` from the terminal for a normal edit. Resolve must be running with a project open.
+
+## Options
+
+| Option | What it does |
 |---|---|
-| BPM | `0` = detectarlo de la canción. Si sale la mitad o el doble del real, escríbelo aquí. |
-| Primer beat (s) | `-1` = detectarlo. Segundos desde el inicio de la canción hasta el primer beat. |
-| Desplazar compás | `-1` = adivinarlo. Si los cortes largos empiezan en el beat 2, 3 o 4 del compás en vez de en el 1, prueba con 1, 2 o 3. |
-| Duración | `0` = lo que dure la canción (60 s si no hay canción). |
-| Pesos 1/2/4 beats | Proporción de cada tipo de corte. Pon `0` para quitar un tipo; por ejemplo solo 4 = un corte por compás. |
-| Semilla | Vacío = aleatoria. La usada queda en la consola y en el marcador crema; escríbela para repetir un montaje. |
-| Marcador cada N compases | Marcadores azules para ayudarte a colocar FX a tiempo (`0` = ninguno). |
-| Timeline | Nombre del timeline. Usa otro nombre para tener varias versiones a la vez, cada una con sus FX. |
-| Evitar repetir trozos | Intenta no usar dos veces la misma parte de un vídeo. |
+| BPM | `0` = detect from the song. If you get half or double the real tempo, type it here. |
+| First beat (s) | `-1` = detect. Seconds from the start of the song to the first beat. |
+| Bar shift | `-1` = guess. If long cuts start on beat 2, 3, or 4 of the bar instead of 1, try 1, 2, or 3. |
+| Duration | `0` = length of the song (60 s if there is no song). |
+| 1/2/4-beat weights | Mix of cut lengths. `0` drops a type; 4 only = one cut per bar. |
+| Seed | Empty = random. The one used is in the Console and the cream marker; type it to repeat an edit. |
+| Marker every N bars | Blue markers to place FX on time (`0` = none). |
+| Timeline | Timeline name. Use another name for several versions at once, each with its own FX. |
+| Avoid repeating stretches | Try not to use the same part of a video twice. |
 
-En `CONFIG` hay además: `audio_clip` (qué canción usar si hay varias), `include_subfolders`
-(usar también las subcarpetas), `tempo_range` (rango de BPM al detectar) y `show_dialog`.
+`CONFIG` also has: `audio_clip` (which song if there are several), `include_subfolders`, `tempo_range` (BPM range when detecting), and `show_dialog`.
 
-## Límites
+## Limits
 
-- Probado contra una **simulación** de la API de scripting de Resolve, no dentro de Resolve.
-  En la simulación salieron cortes seguidos sin huecos, siempre a ±1 fotograma del beat, con vídeos a
-  distinto frame rate, y las pistas V2+ y los marcadores propios se conservaron al regenerar.
-  La ventana de opciones solo la pude probar con una imitación de la interfaz de Resolve.
-- Hace falta una versión de Resolve que admita `recordFrame` en `AppendToTimeline` (las actuales lo
-  hacen). Si no, el script se para con un aviso y quita lo que había añadido.
-- La detección de tempo supone un **tempo constante**. En pistas de prueba a 87, 100,5, 120, 128 y 140
-  BPM acertó el tempo (como mucho 0,01 BPM de diferencia) y el primer beat (unos 5 ms de error). Con 174 BPM (drum and bass) dio 87,
-  la mitad, que es la ambigüedad típica; los cortes siguen cayendo a tiempo, pero cada 2 beats. Si pasa,
-  escribe el BPM. El inicio del compás es una estimación: si los cortes largos caen desplazados, usa
-  *Desplazar compás*.
-- Solo usa la imagen de los vídeos; su audio original no entra en el montaje.
-- Si los vídeos tienen distinto frame rate que el timeline, algún corte puede quedar un fotograma antes
-  o después del beat. El script lo corrige en el corte siguiente, así que el error no se acumula.
+- Tested against a **simulation** of Resolve’s scripting API, not inside Resolve. In the simulation, cuts were gapless, always within ±1 frame of the beat, with mixed frame rates, and V2+ tracks and your own markers survived regenerate. The options window was only tried against a stand-in for Resolve’s UI.
+- Needs a Resolve build that honors `recordFrame` in `AppendToTimeline` (current versions do). If not, the script stops with a warning and removes what it added.
+- Tempo detection assumes a **constant tempo**. On test tracks at 87, 100.5, 120, 128, and 140 BPM it matched tempo (at most 0.01 BPM off) and the first beat (about 5 ms error). At 174 BPM (drum and bass) it reported 87, half, the usual octave error; cuts still land on time, but every 2 beats. If that happens, type the BPM. Downbeat is a guess: if long cuts look shifted, use *Bar shift*.
+- Only video from the clips is used; their original audio is not in the edit.
+- If clips have a different frame rate than the timeline, a cut may sit one frame early or late. The next cut corrects it, so the error does not accumulate.

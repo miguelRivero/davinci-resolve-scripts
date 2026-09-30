@@ -2,29 +2,28 @@
 # -*- coding: utf-8 -*-
 # resolve-menu: Utility
 """
-Beat mashup para DaVinci Resolve
-================================
-Trocea al azar los vídeos de la carpeta (bin) que tengas abierta en el Media
-Pool y los monta a ritmo sobre una canción: cada corte empieza y termina en un
-beat y dura 1, 2 o 4 beats (los de 2 y 4 caen alineados con el compás). El BPM
-lo indicas tú o se detecta del archivo de audio que haya en el pool.
+Beat mashup for DaVinci Resolve
+===============================
+Randomly slices videos from the Media Pool bin you have open and cuts them to
+a song: each cut starts and ends on a beat and lasts 1, 2, or 4 beats (2- and
+4-beat cuts land on the bar). You type the BPM or it is detected from audio
+in the pool.
 
-Tu trabajo manual se conserva
-  El script solo reescribe la pista de vídeo V1 y la de audio A1 de SU
-  timeline (por defecto "Beat mashup"). Pon filtros y FX en adjustment clips,
-  títulos u overlays en V2 o más arriba (y sonidos extra en A2+): al volver a
-  generar se quedan como están. No pongas FX directamente en los cortes de
-  V1, porque se rehacen cada vez.
+Manual work is kept
+  The script only rewrites video track V1 and audio track A1 of ITS timeline
+  (default "Beat mashup"). Put filters and FX on adjustment clips, titles, or
+  overlays on V2 or above (and extra sound on A2+): they stay when you
+  regenerate. Do not put FX on the V1 cuts; those are rebuilt every run.
 
-Instalación
-  Desde la raíz del repo: python tools/install.py
-  (o copia este archivo a mano en
+Install
+  From this repository's root: python tools/install.py
+  (or copy this file by hand to
     %APPDATA%\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\Scripts\\Utility)
-  y ejecútalo desde Workspace > Scripts > beat_mashup. Los mensajes salen en
+  then run it from Workspace > Scripts > beat_mashup. Messages go to
   Workspace > Console.
-  Necesita Python 3 de 64 bits instalado (python.org). Para detectar el BPM de
-  MP3, M4A, AIFF... hace falta ffmpeg en el PATH (o su ruta en CONFIG); con
-  WAV no hace falta. numpy es opcional: acelera el análisis.
+  Needs 64-bit Python 3 (python.org). Detecting BPM from MP3, M4A, AIFF...
+  needs ffmpeg on PATH (or its path in CONFIG); WAV does not. numpy is
+  optional and speeds up analysis.
 """
 import math
 import os
@@ -36,30 +35,30 @@ import time
 import wave
 from array import array
 
-# --------------------------------------------------------------------------- ajustes
+# --------------------------------------------------------------------------- settings
 CONFIG = {
-    'bpm': 0,                  # 0 = detectar del audio del pool
-    'first_beat': None,        # segundos hasta el primer beat; None = detectar (0 si no hay audio)
-    'bar_shift': None,         # 0-3: desplaza dónde empieza el compás; None = detectar
-    'duration': 0,             # segundos; 0 = lo que dure la canción (60 s si no hay canción)
-    'beat_weights': {1: 45, 2: 35, 4: 20},  # probabilidad relativa de cortes de 1, 2 y 4 beats
-    'seed': None,              # None = aleatoria (se escribe en la consola y en un marcador)
+    'bpm': 0,                  # 0 = detect from pool audio
+    'first_beat': None,        # seconds to first beat; None = detect (0 if no audio)
+    'bar_shift': None,         # 0-3: shift where the bar starts; None = detect
+    'duration': 0,             # seconds; 0 = song length (60 s if no song)
+    'beat_weights': {1: 45, 2: 35, 4: 20},  # relative chance of 1, 2, and 4-beat cuts
+    'seed': None,              # None = random (written to the Console and a marker)
     'timeline_name': 'Beat mashup',
-    'audio_clip': '',          # nombre del clip de audio; '' = el primero que encuentre
+    'audio_clip': '',          # audio clip name; '' = first one found
     'include_subfolders': False,
-    'markers_every_bars': 4,   # un marcador cada N compases (0 = ninguno)
-    'avoid_reuse': True,       # intenta no repetir el mismo trozo de un vídeo
-    'tempo_range': (70, 180),  # rango al detectar (evita que salga el doble o la mitad)
-    'ffmpeg': '',              # ruta a ffmpeg.exe si no está en el PATH
-    'show_dialog': True,       # ventana de opciones al ejecutar (si tu Resolve la admite)
+    'markers_every_bars': 4,   # a marker every N bars (0 = none)
+    'avoid_reuse': True,       # try not to reuse the same stretch of a video
+    'tempo_range': (70, 180),  # range when detecting (avoids half/double tempo)
+    'ffmpeg': '',              # path to ffmpeg.exe if it is not on PATH
+    'show_dialog': True,       # options window when run (if this Resolve build supports it)
 }
 
-TAG = 'beat-mashup'            # marca los marcadores que crea el script
-SR = 11025                     # frecuencia de análisis
-HOP = 256                      # muestras por paso de análisis (~23 ms)
+TAG = 'beat-mashup'            # tags markers this script creates
+SR = 11025                     # analysis sample rate
+HOP = 256                      # samples per analysis hop (~23 ms)
 
 
-# --------------------------------------------------------------------------- utilidades
+# --------------------------------------------------------------------------- helpers
 def log(*args):
     print('[beat mashup]', *args)
     sys.stdout.flush()
@@ -85,7 +84,7 @@ class Abort(Exception):
     pass
 
 
-# --------------------------------------------------------------------------- acceso a Resolve
+# --------------------------------------------------------------------------- Resolve access
 def get_resolve():
     g = globals()
     if g.get('resolve'):
@@ -168,7 +167,7 @@ def find_timeline(project, name):
     return None
 
 
-# --------------------------------------------------------------------------- análisis de audio
+# --------------------------------------------------------------------------- audio analysis
 def decode_mono(path, ffmpeg_hint=''):
     """Returns (samples as array('h'), sample rate)."""
     ffmpeg = ffmpeg_hint or shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
@@ -182,10 +181,10 @@ def decode_mono(path, ffmpeg_hint=''):
             if sys.byteorder == 'big':
                 a.byteswap()
             return a, SR
-        log('ffmpeg no pudo leer el audio:', proc.stderr.decode('utf-8', 'replace')[:300])
+        log('ffmpeg could not read the audio:', proc.stderr.decode('utf-8', 'replace')[:300])
     if path.lower().endswith(('.wav', '.wave')):
         return read_wav(path)
-    raise Abort('Para detectar el BPM de "%s" hace falta ffmpeg (o usa un WAV, o escribe el BPM).'
+    raise Abort('Detecting BPM from "%s" needs ffmpeg (or use a WAV, or type the BPM).'
                 % os.path.basename(path))
 
 
@@ -239,7 +238,7 @@ def onset_envelope(x, sr):
         s = np.asarray(x, np.float32) / 32768.0
         n_fft = 1024
         if len(s) < n_fft * 4:
-            raise Abort('El audio es demasiado corto para detectar el tempo.')
+            raise Abort('Audio is too short to detect tempo.')
         win = np.hanning(n_fft).astype(np.float32)
         low_bins = max(2, int(150.0 * n_fft / sr))
         frames = 1 + (len(s) - n_fft) // HOP
@@ -262,7 +261,7 @@ def onset_envelope(x, sr):
     # pure Python: energy flux on the full band, a crude high band and a crude low band
     n = len(x) // HOP
     if n < 64:
-        raise Abort('El audio es demasiado corto para detectar el tempo.')
+            raise Abort('Audio is too short to detect tempo.')
     full, high, lowe = [0.0] * n, [0.0] * n, [0.0] * n
     prev, lp = 0, 0.0
     k = 1.0 / 16  # one-pole low-pass, ~110 Hz at 11 kHz
@@ -319,7 +318,7 @@ class Analysis:
         self.tempo_range = tempo_range
         self.bpm = self._tempo()
         self.first_beat, self.bar_shift = self.phase_for(self.bpm)
-        log('análisis: %.2f BPM, primer beat %.3f s, en %.1f s' % (self.bpm, self.first_beat, time.time() - t0))
+        log('analysis: %.2f BPM, first beat %.3f s, in %.1f s' % (self.bpm, self.first_beat, time.time() - t0))
 
     def _comb(self, bpm, step=0.5, curve=None):
         """best mean novelty on a beat grid of this tempo, and its phase (envelope frames)"""
@@ -393,7 +392,7 @@ class Analysis:
         return first, (4 - j) % 4
 
 
-# --------------------------------------------------------------------------- plan de cortes
+# --------------------------------------------------------------------------- cut plan
 def plan_bounds(duration, bpm, first_beat, bar_shift, weights, rng, fps):
     """Cut times in seconds: 0, ..., duration. Every cut after the intro lands on a beat."""
     beat = 60.0 / bpm
@@ -450,7 +449,7 @@ def pick_start(clip, need, used, rng, avoid_reuse):
     return best
 
 
-# --------------------------------------------------------------------------- diálogo (opcional)
+# --------------------------------------------------------------------------- dialog (optional)
 def get_ui(resolve):
     g = globals()
     fu = g.get('fu') or g.get('fusion')
@@ -480,27 +479,27 @@ def ask_options(ui, disp, cfg, info):
         ui.VGroup({'Spacing': 6}, [
             ui.Label({'Text': info, 'WordWrap': True, 'Weight': 0}),
             ui.VGap(4),
-            row('BPM (0 = detectar)', ui.DoubleSpinBox({'ID': 'bpm', 'Minimum': 0, 'Maximum': 400, 'Decimals': 2,
+            row('BPM (0 = detect)', ui.DoubleSpinBox({'ID': 'bpm', 'Minimum': 0, 'Maximum': 400, 'Decimals': 2,
                                                          'Value': float(cfg['bpm'] or 0), 'Weight': 0.45})),
-            row('Primer beat en s (-1 = detectar)', ui.DoubleSpinBox({
+            row('First beat in s (-1 = detect)', ui.DoubleSpinBox({
                 'ID': 'first', 'Minimum': -1, 'Maximum': 60, 'Decimals': 3, 'SingleStep': 0.01,
                 'Value': -1.0 if cfg['first_beat'] is None else float(cfg['first_beat']), 'Weight': 0.45})),
-            row('Desplazar compás (-1 = detectar)', ui.SpinBox({
+            row('Bar shift (-1 = detect)', ui.SpinBox({
                 'ID': 'shift', 'Minimum': -1, 'Maximum': 3,
                 'Value': -1 if cfg['bar_shift'] is None else int(cfg['bar_shift']), 'Weight': 0.45})),
-            row('Duración en s (0 = canción)', ui.DoubleSpinBox({'ID': 'dur', 'Minimum': 0, 'Maximum': 36000,
+            row('Duration in s (0 = song)', ui.DoubleSpinBox({'ID': 'dur', 'Minimum': 0, 'Maximum': 36000,
                                                                   'Decimals': 1, 'Value': float(cfg['duration'] or 0),
                                                                   'Weight': 0.45})),
-            row('Peso cortes de 1 beat', ui.SpinBox({'ID': 'w1', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(1, 0)), 'Weight': 0.45})),
-            row('Peso cortes de 2 beats', ui.SpinBox({'ID': 'w2', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(2, 0)), 'Weight': 0.45})),
-            row('Peso cortes de 4 beats', ui.SpinBox({'ID': 'w4', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(4, 0)), 'Weight': 0.45})),
-            row('Semilla (vacío = aleatoria)', ui.LineEdit({'ID': 'seed', 'Text': '' if cfg['seed'] is None else str(cfg['seed']), 'Weight': 0.45})),
-            row('Marcador cada N compases', ui.SpinBox({'ID': 'marks', 'Minimum': 0, 'Maximum': 64, 'Value': int(cfg['markers_every_bars']), 'Weight': 0.45})),
+            row('Weight of 1-beat cuts', ui.SpinBox({'ID': 'w1', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(1, 0)), 'Weight': 0.45})),
+            row('Weight of 2-beat cuts', ui.SpinBox({'ID': 'w2', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(2, 0)), 'Weight': 0.45})),
+            row('Weight of 4-beat cuts', ui.SpinBox({'ID': 'w4', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(4, 0)), 'Weight': 0.45})),
+            row('Seed (empty = random)', ui.LineEdit({'ID': 'seed', 'Text': '' if cfg['seed'] is None else str(cfg['seed']), 'Weight': 0.45})),
+            row('Marker every N bars', ui.SpinBox({'ID': 'marks', 'Minimum': 0, 'Maximum': 64, 'Value': int(cfg['markers_every_bars']), 'Weight': 0.45})),
             row('Timeline', ui.LineEdit({'ID': 'name', 'Text': cfg['timeline_name'], 'Weight': 0.45})),
-            ui.CheckBox({'ID': 'reuse', 'Text': 'Evitar repetir el mismo trozo de un vídeo', 'Checked': bool(cfg['avoid_reuse']), 'Weight': 0}),
-            ui.Label({'Text': 'Solo se rehacen V1 y A1. Pon tus FX en V2 o más arriba.', 'WordWrap': True, 'Weight': 0}),
-            ui.HGroup({'Weight': 0}, [ui.Button({'ID': 'cancel', 'Text': 'Cancelar'}),
-                                      ui.Button({'ID': 'ok', 'Text': 'Generar', 'Default': True})]),
+            ui.CheckBox({'ID': 'reuse', 'Text': 'Avoid repeating the same stretch of a video', 'Checked': bool(cfg['avoid_reuse']), 'Weight': 0}),
+            ui.Label({'Text': 'Only V1 and A1 are rebuilt. Put your FX on V2 or above.', 'WordWrap': True, 'Weight': 0}),
+            ui.HGroup({'Weight': 0}, [ui.Button({'ID': 'cancel', 'Text': 'Cancel'}),
+                                      ui.Button({'ID': 'ok', 'Text': 'Generate', 'Default': True})]),
         ]),
     ])
     items = win.GetItems()
@@ -551,11 +550,11 @@ def show_message(ui, disp, title, text):
         pass
 
 
-# --------------------------------------------------------------------------- montaje
+# --------------------------------------------------------------------------- edit
 def build(resolve, cfg, ui=None, disp=None):
     project = resolve.GetProjectManager().GetCurrentProject()
     if not project:
-        raise Abort('No hay ningún proyecto abierto.')
+        raise Abort('No project is open.')
     pool = project.GetMediaPool()
     folder = pool.GetCurrentFolder() or pool.GetRootFolder()
     folder_name = folder.GetName()
@@ -569,18 +568,18 @@ def build(resolve, cfg, ui=None, disp=None):
         audios = [c for c in audios if c.name == cfg['audio_clip']] or audios
     song = audios[0] if audios else None
 
-    info = 'Carpeta "%s": %d vídeo(s). Canción: %s' % (folder_name, len(videos), song.name if song else 'ninguna')
+    info = 'Bin "%s": %d video(s). Song: %s' % (folder_name, len(videos), song.name if song else 'none')
     if ui is not None and cfg.get('show_dialog'):
         cfg = ask_options(ui, disp, cfg, info)
         if cfg is None:
-            log('cancelado')
+            log('cancelled')
             return None
     log(info)
     if not videos:
-        raise Abort('No hay vídeos en la carpeta "%s" del Media Pool. Abre la carpeta con tus clips y vuelve a ejecutar.'
+        raise Abort('No videos in Media Pool bin "%s". Open the bin with your clips and run again.'
                     % folder_name)
     if not any(w > 0 for w in cfg['beat_weights'].values()):
-        raise Abort('Todos los pesos de corte son 0.')
+        raise Abort('All cut weights are 0.')
 
     # ---- tempo
     bpm = float(cfg['bpm'] or 0)
@@ -588,13 +587,13 @@ def build(resolve, cfg, ui=None, disp=None):
     if song and (bpm <= 0 or cfg['first_beat'] is None or cfg['bar_shift'] is None):
         if not song.path or not os.path.exists(song.path):
             if bpm <= 0:
-                raise Abort('No encuentro el archivo de "%s" en disco para detectar el BPM.' % song.name)
+                raise Abort('Cannot find the file for "%s" on disk to detect BPM.' % song.name)
         else:
-            log('analizando', song.name, '...')
+            log('analyzing', song.name, '...')
             analysis = Analysis(song.path, tuple(cfg['tempo_range']), cfg['ffmpeg'])
     if bpm <= 0:
         if not analysis:
-            raise Abort('Indica el BPM o añade la canción al Media Pool para detectarlo.')
+            raise Abort('Type the BPM or add the song to the Media Pool so it can be detected.')
         bpm = analysis.bpm
     first_beat, bar_shift = 0.0, 0
     if analysis:
@@ -613,21 +612,21 @@ def build(resolve, cfg, ui=None, disp=None):
         v1 = tl.GetItemListInTrack('video', 1) or []
         a1 = tl.GetItemListInTrack('audio', 1) or []
         if (v1 or a1) and not ours:
-            raise Abort('Ya existe un timeline "%s" que no ha creado este script. Cambia el nombre en las opciones '
-                        'para no tocarlo.' % name)
+            raise Abort('A timeline named "%s" already exists and this script did not create it. Change the name '
+                        'in the options so it is not overwritten.' % name)
         project.SetCurrentTimeline(tl)
         if v1 or a1:
             if not tl.DeleteClips(list(v1) + list(a1), False):
-                raise Abort('No pude borrar los cortes anteriores de V1/A1 (¿pista bloqueada?).')
+                raise Abort('Could not delete previous V1/A1 clips (locked track?).')
         for f in ours:
             tl.DeleteMarkerAtFrame(f)
-        log('regenerando V1 y A1 de "%s"; el resto de pistas no se toca' % name)
+        log('regenerating V1 and A1 of "%s"; other tracks are left alone' % name)
     else:
         tl = pool.CreateEmptyTimeline(name)
         if not tl:
-            raise Abort('No pude crear el timeline "%s".' % name)
+            raise Abort('Could not create timeline "%s".' % name)
         project.SetCurrentTimeline(tl)
-        log('timeline nuevo "%s"' % name)
+        log('new timeline "%s"' % name)
 
     fps = to_float(tl.GetSetting('timelineFrameRate'), 0) or to_float(project.GetSetting('timelineFrameRate'), 25)
     start = int(tl.GetStartFrame())
@@ -643,7 +642,7 @@ def build(resolve, cfg, ui=None, disp=None):
     rng = random.Random(seed)
     bounds = plan_bounds(duration, bpm, first_beat, bar_shift, cfg['beat_weights'], rng, fps)
     grid = [int(round(b * fps)) for b in bounds]
-    log('%.2f BPM, primer beat %.3f s, desplazamiento de compás %d, %d cortes, %.1f s, semilla %s'
+    log('%.2f BPM, first beat %.3f s, bar shift %d, %d cuts, %.1f s, seed %s'
         % (bpm, first_beat, bar_shift, len(bounds) - 1, duration, seed))
 
     # ---- song on A1
@@ -654,7 +653,7 @@ def build(resolve, cfg, ui=None, disp=None):
         got = pool.AppendToTimeline([{'mediaPoolItem': song.item, 'startFrame': 0, 'endFrame': n - 1,
                                       'mediaType': 2, 'trackIndex': 1, 'recordFrame': start}])
         if not got:
-            log('aviso: no pude poner la canción en A1')
+            log('warning: could not place the song on A1')
         song_items = list(got or [])
 
     # ---- cuts on V1, each placed where the previous one really ended
@@ -672,13 +671,13 @@ def build(resolve, cfg, ui=None, disp=None):
         got = pool.AppendToTimeline([{'mediaPoolItem': clip.item, 'startFrame': s, 'endFrame': e,
                                       'mediaType': 1, 'trackIndex': 1, 'recordFrame': rec}])
         if not got:
-            raise Abort('Resolve no aceptó el corte %d (%s, frames %d-%d).' % (i + 1, clip.name, s, e))
+            raise Abort('Resolve rejected cut %d (%s, frames %d-%d).' % (i + 1, clip.name, s, e))
         item = got[0]
         at, dur = int(item.GetStart()), int(item.GetDuration())
         if placed == 0 and at != rec:
             tl.DeleteClips([item] + song_items, False)
-            raise Abort('Tu versión de Resolve ignora "recordFrame" al añadir clips; hace falta una versión '
-                        'más reciente para este script.')
+            raise Abort('This Resolve build ignores "recordFrame" when adding clips; you need a newer '
+                        'version for this script.')
         if not calibrated and abs((clip.fps or fps) - fps) < 1e-3:
             calibrated = True
             if dur == need - 1 + end_adjust:
@@ -687,10 +686,10 @@ def build(resolve, cfg, ui=None, disp=None):
         prev = clip.uid
         placed += 1
         if placed % 50 == 0:
-            log('%d cortes...' % placed)
+            log('%d cuts...' % placed)
 
     # ---- markers
-    info_note = '%.2f BPM · primer beat %.3f s · compás +%d · semilla %s · %d cortes' % (
+    info_note = '%.2f BPM · first beat %.3f s · bar +%d · seed %s · %d cuts' % (
         bpm, first_beat, bar_shift, seed, placed)
     tl.AddMarker(0, 'Cream', 'Beat mashup', info_note, 1, TAG + ':info')
     every = int(cfg['markers_every_bars'] or 0)
@@ -703,11 +702,11 @@ def build(resolve, cfg, ui=None, disp=None):
                 if bar % every == 0:
                     f = int(round((t + k * beat) * fps))
                     if f > 0:
-                        tl.AddMarker(f, 'Sky', 'Compás %d' % (bar + 1), '', 1, TAG + ':bar')
+                        tl.AddMarker(f, 'Sky', 'Bar %d' % (bar + 1), '', 1, TAG + ':bar')
                 bar += 1
             k += 1
 
-    msg = ('%d cortes a %.2f BPM en "%s" (semilla %s, %.1f s).\nTus FX en V2+ se han conservado.'
+    msg = ('%d cuts at %.2f BPM on "%s" (seed %s, %.1f s).\nYour FX on V2+ were kept.'
            % (placed, bpm, name, seed, time.time() - t0))
     log(msg.replace('\n', ' '))
     return {'timeline': tl, 'bpm': bpm, 'first_beat': first_beat, 'bar_shift': bar_shift, 'seed': seed,
@@ -717,7 +716,7 @@ def build(resolve, cfg, ui=None, disp=None):
 def main():
     resolve = get_resolve()
     if resolve is None:
-        log('No encuentro Resolve. Ejecuta el script desde Workspace > Scripts dentro de DaVinci Resolve.')
+        log('Cannot find Resolve. Run this from Workspace > Scripts inside DaVinci Resolve.')
         return
     ui, disp = get_ui(resolve) if CONFIG.get('show_dialog') else (None, None)
     try:

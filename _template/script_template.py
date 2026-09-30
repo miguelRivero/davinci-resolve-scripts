@@ -2,36 +2,36 @@
 # -*- coding: utf-8 -*-
 # resolve-menu: Utility
 """
-Plantilla de script para DaVinci Resolve
-========================================
-Copia la carpeta _template, cámbiale el nombre (p. ej. mi-script/) y renombra
-este archivo (p. ej. mi_script.py): ese nombre es el que verás en
-Workspace > Scripts. Tal cual, solo muestra información del proyecto abierto,
-así que sirve para comprobar que Resolve ejecuta tus scripts.
+DaVinci Resolve script template
+================================
+Copy the _template folder, rename it (e.g. my-script/) and rename this file
+(e.g. my_script.py): that name is what you see under Workspace > Scripts.
+As-is it only prints info about the open project, so you can check that
+Resolve can run your scripts.
 
-Menú: la línea "# resolve-menu:" de arriba decide dónde lo instala
-tools/install.py (Utility, Edit, Color, Deliver o Comp).
+Menu: the "# resolve-menu:" line above is where tools/install.py copies it
+(Utility, Edit, Color, Deliver, or Comp).
 
-Mantén el script en un solo archivo: Resolve lo copia y ejecuta suelto, sin el
-resto del repo.
+Keep the script in a single file: Resolve copies and runs it alone, without
+the rest of this repository.
 """
 import sys
 
-# --------------------------------------------------------------------------- ajustes
+# --------------------------------------------------------------------------- settings
 CONFIG = {
-    'show_dialog': True,   # ventana de opciones (si tu Resolve la admite)
-    'greeting': 'Hola',    # ejemplo de opción
+    'show_dialog': True,   # options window (if this Resolve build supports it)
+    'greeting': 'Hello',   # example option
 }
 
 
-# --------------------------------------------------------------------------- utilidades
+# --------------------------------------------------------------------------- helpers
 def log(*args):
-    print('[mi script]', *args)
+    print('[my script]', *args)
     sys.stdout.flush()
 
 
 class Abort(Exception):
-    """Para parar con un mensaje claro para el usuario."""
+    """Stop with a clear message for the user."""
 
 
 def get_resolve():
@@ -100,13 +100,13 @@ def show_message(ui, disp, title, text):
 
 
 def ask_options(ui, disp, cfg):
-    """Ventana de opciones. Devuelve la configuración cambiada, o None si se cancela."""
-    win = disp.AddWindow({'ID': 'Options', 'WindowTitle': 'Mi script', 'Geometry': [300, 200, 360, 140]}, [
+    """Options window. Returns the updated config, or None if cancelled."""
+    win = disp.AddWindow({'ID': 'Options', 'WindowTitle': 'My script', 'Geometry': [300, 200, 360, 140]}, [
         ui.VGroup({'Spacing': 6}, [
-            ui.HGroup({'Weight': 0}, [ui.Label({'Text': 'Saludo', 'Weight': 0.4}),
+            ui.HGroup({'Weight': 0}, [ui.Label({'Text': 'Greeting', 'Weight': 0.4}),
                                       ui.LineEdit({'ID': 'greeting', 'Text': cfg['greeting'], 'Weight': 0.6})]),
-            ui.HGroup({'Weight': 0}, [ui.Button({'ID': 'cancel', 'Text': 'Cancelar'}),
-                                      ui.Button({'ID': 'ok', 'Text': 'Aceptar'})]),
+            ui.HGroup({'Weight': 0}, [ui.Button({'ID': 'cancel', 'Text': 'Cancel'}),
+                                      ui.Button({'ID': 'ok', 'Text': 'OK'})]),
         ]),
     ])
     items = win.GetItems()
@@ -129,20 +129,20 @@ def ask_options(ui, disp, cfg):
     return out
 
 
-# --------------------------------------------------------------------------- lo que hace el script
+# --------------------------------------------------------------------------- what the script does
 def run(resolve, cfg):
     project = resolve.GetProjectManager().GetCurrentProject()
     if not project:
-        raise Abort('No hay ningún proyecto abierto.')
+        raise Abort('No project is open.')
     pool = project.GetMediaPool()
     folder = pool.GetCurrentFolder() or pool.GetRootFolder()
     timeline = project.GetCurrentTimeline()
     clips = folder.GetClipList() or []
     lines = [
-        '%s desde Resolve %s' % (cfg['greeting'], resolve.GetVersionString() if hasattr(resolve, 'GetVersionString') else ''),
-        'Proyecto: %s' % project.GetName(),
-        'Timeline actual: %s' % (timeline.GetName() if timeline else 'ninguno'),
-        'Carpeta abierta del Media Pool: %s (%d clips)' % (folder.GetName(), len(clips)),
+        '%s from Resolve %s' % (cfg['greeting'], resolve.GetVersionString() if hasattr(resolve, 'GetVersionString') else ''),
+        'Project: %s' % project.GetName(),
+        'Current timeline: %s' % (timeline.GetName() if timeline else 'none'),
+        'Open Media Pool bin: %s (%d clips)' % (folder.GetName(), len(clips)),
     ]
     for line in lines:
         log(line)
@@ -152,7 +152,7 @@ def run(resolve, cfg):
 def main():
     resolve = get_resolve()
     if resolve is None:
-        log('No encuentro Resolve. Ejecuta el script desde Workspace > Scripts dentro de DaVinci Resolve.')
+        log('Cannot find Resolve. Run this from Workspace > Scripts inside DaVinci Resolve.')
         return
     ui, disp = get_ui(resolve) if CONFIG.get('show_dialog') else (None, None)
     cfg = dict(CONFIG)
@@ -160,12 +160,12 @@ def main():
         if ui is not None:
             cfg = ask_options(ui, disp, cfg)
             if cfg is None:
-                log('cancelado')
+                log('cancelled')
                 return
-        show_message(ui, disp, 'Mi script', run(resolve, cfg))
+        show_message(ui, disp, 'My script', run(resolve, cfg))
     except Abort as e:
         log('ERROR:', e)
-        show_message(ui, disp, 'Mi script', str(e))
+        show_message(ui, disp, 'My script', str(e))
 
 
 if __name__ == '__main__' or 'resolve' in globals() or 'app' in globals():

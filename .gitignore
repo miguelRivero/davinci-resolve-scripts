@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# media and renders used while testing
+*.mp4
+*.mov
+*.mxf
+*.wav
+*.mp3
+*.aif
+*.aiff
+*.flac
+*.m4a
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

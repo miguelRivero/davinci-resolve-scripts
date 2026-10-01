@@ -5,9 +5,17 @@
 Beat mashup for DaVinci Resolve
 ===============================
 Randomly slices videos from the Media Pool bin you have open and cuts them to
-a song: each cut starts and ends on a beat and lasts 1, 2, or 4 beats (2- and
-4-beat cuts land on the bar). You type the BPM or it is detected from audio
-in the pool.
+a song: each cut starts and ends on a beat and lasts between min_beats and
+max_beats beats (valid values 1, 2, 4 – anything that divides evenly into a
+bar). You type the BPM or it is detected from audio in the pool.
+
+Optionally the script snaps each cut point to the nearest loud transient
+(snare, clap, kick hit) within a half-beat window so that cuts align to the
+loudest hits rather than the mathematical beat position.
+
+All settings live in beat_mashup.cfg next to this file. Create or edit that
+file to change behaviour without touching the code.  The script runs fine
+without the file; built-in defaults are used.
 
 Manual work is kept
   The script only rewrites video track V1 and audio track A1 of ITS timeline
@@ -21,10 +29,11 @@ Install
     %APPDATA%\\Blackmagic Design\\DaVinci Resolve\\Support\\Fusion\\Scripts\\Utility)
   then run it from Workspace > Scripts > beat_mashup. Messages go to
   Workspace > Console.
-  Needs 64-bit Python 3 (python.org). Detecting BPM from MP3, M4A, AIFF...
-  needs ffmpeg on PATH (or its path in CONFIG); WAV does not. numpy is
-  optional and speeds up analysis.
+  Needs 64-bit Python 3 (python.org). Detecting BPM from MP3, M4A, FLAC,
+  AIFF, OGG... needs ffmpeg on PATH (or its path in the config file); WAV
+  does not. numpy is optional and speeds up analysis.
 """
+import configparser
 import math
 import os
 import random
@@ -41,7 +50,22 @@ CONFIG = {
     'first_beat': None,        # seconds to first beat; None = detect (0 if no audio)
     'bar_shift': None,         # 0-3: shift where the bar starts; None = detect
     'duration': 0,             # seconds; 0 = song length (60 s if no song)
-    'beat_weights': {1: 45, 2: 35, 4: 20},  # relative chance of 1, 2, and 4-beat cuts
+    # Cut length range. Allowed beat counts are 1, 2, and 4 (the ones that
+    # divide evenly into a 4/4 bar). min_beats and max_beats are inclusive;
+    # any allowed count within the range gets equal probability.
+    # e.g. min_beats=1 max_beats=4  → 1, 2, and 4-beat cuts (equal weight)
+    #      min_beats=2 max_beats=4  → 2 and 4-beat cuts only
+    #      min_beats=4 max_beats=4  → every cut is exactly one bar
+    'min_beats': 1,
+    'max_beats': 4,
+    # Transient (hit) snapping ------------------------------------------------
+    # When snap_to_hits is true, each computed beat boundary is shifted to the
+    # nearest loud transient within a half-beat window.  Only boundaries where
+    # the strongest nearby onset exceeds hit_threshold (0–1, fraction of the
+    # loudest onset in the whole track) are moved; quieter beats stay put.
+    'snap_to_hits': True,
+    'hit_threshold': 0.35,     # 0 = snap everything, 1 = snap nothing
+    # -------------------------------------------------------------------------
     'seed': None,              # None = random (written to the Console and a marker)
     'timeline_name': 'Beat mashup',
     'audio_clip': '',          # audio clip name; '' = first one found
@@ -56,6 +80,83 @@ CONFIG = {
 TAG = 'beat-mashup'            # tags markers this script creates
 SR = 11025                     # analysis sample rate
 HOP = 256                      # samples per analysis hop (~23 ms)
+
+# --------------------------------------------------------------------------- config file
+def _script_dir():
+    """Directory that contains this .py file (works inside Resolve too)."""
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        return os.getcwd()
+
+
+def load_config(cfg):
+    """Read beat_mashup.cfg next to the script and merge into cfg dict."""
+    path = os.path.join(_script_dir(), 'beat_mashup.cfg')
+    if not os.path.exists(path):
+        return cfg
+    parser = configparser.ConfigParser(inline_comment_prefixes=('#', ';'))
+    try:
+        parser.read(path, encoding='utf-8')
+    except Exception as e:
+        log('Could not read beat_mashup.cfg:', e)
+        return cfg
+    if not parser.has_section('beat_mashup'):
+        return cfg
+    sec = parser['beat_mashup']
+    out = dict(cfg)
+
+    def _float(key, default):
+        try:
+            return float(sec[key])
+        except (KeyError, ValueError):
+            return default
+
+    def _int(key, default):
+        try:
+            return int(sec[key])
+        except (KeyError, ValueError):
+            return default
+
+    def _bool(key, default):
+        try:
+            return sec.getboolean(key)
+        except (KeyError, ValueError):
+            return default
+
+    def _str(key, default):
+        return sec.get(key, default)
+
+    out['bpm'] = _float('bpm', cfg['bpm'])
+    raw_first = _float('first_beat', -999)
+    if raw_first != -999:
+        out['first_beat'] = None if raw_first < 0 else raw_first
+    raw_shift = _int('bar_shift', -999)
+    if raw_shift != -999:
+        out['bar_shift'] = None if raw_shift < 0 else raw_shift
+    out['duration'] = _float('duration', cfg['duration'])
+    out['min_beats'] = max(1, _int('min_beats', cfg['min_beats']))
+    out['max_beats'] = max(1, _int('max_beats', cfg['max_beats']))
+    out['snap_to_hits'] = _bool('snap_to_hits', cfg['snap_to_hits'])
+    out['hit_threshold'] = max(0.0, min(1.0, _float('hit_threshold', cfg['hit_threshold'])))
+    out['seed_raw'] = _str('seed', '')  # handled below
+    seed_str = _str('seed', '').strip()
+    if seed_str:
+        out['seed'] = int(seed_str) if seed_str.lstrip('-').isdigit() else seed_str
+    out['timeline_name'] = _str('timeline_name', cfg['timeline_name']).strip() or cfg['timeline_name']
+    out['audio_clip'] = _str('audio_clip', cfg['audio_clip'])
+    out['include_subfolders'] = _bool('include_subfolders', cfg['include_subfolders'])
+    out['markers_every_bars'] = _int('markers_every_bars', cfg['markers_every_bars'])
+    out['avoid_reuse'] = _bool('avoid_reuse', cfg['avoid_reuse'])
+    out['ffmpeg'] = _str('ffmpeg', cfg['ffmpeg'])
+    raw_range = _str('tempo_range', '').strip()
+    if raw_range:
+        try:
+            lo, hi = [float(x.strip()) for x in raw_range.split(',')]
+            out['tempo_range'] = (lo, hi)
+        except ValueError:
+            pass
+    return out
 
 
 # --------------------------------------------------------------------------- helpers
@@ -190,12 +291,24 @@ def find_ffmpeg(hint=''):
 
 
 def decode_mono(path, ffmpeg_hint=''):
-    """Returns (samples as array('h'), sample rate)."""
+    """Returns (samples as array('h'), sample rate).
+
+    Supported formats
+    -----------------
+    Without ffmpeg : WAV (any bit depth, any sample rate, mono or stereo)
+    With ffmpeg    : MP3, FLAC, M4A/AAC, AIFF, OGG/Vorbis, OPUS, WMA, and
+                     any other container/codec ffmpeg understands.
+
+    If ffmpeg is not found and the file is not a WAV the function raises
+    Abort with a message that explains what to install.
+    """
     ffmpeg = find_ffmpeg(ffmpeg_hint)
     if ffmpeg:
         flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
-        proc = subprocess.run([ffmpeg, '-v', 'error', '-i', path, '-f', 's16le', '-ac', '1', '-ar', str(SR), '-'],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
+        proc = subprocess.run(
+            [ffmpeg, '-v', 'error', '-i', path,
+             '-f', 's16le', '-ac', '1', '-ar', str(SR), '-'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags)
         if proc.returncode == 0 and proc.stdout:
             a = array('h')
             a.frombytes(proc.stdout[: len(proc.stdout) // 2 * 2])
@@ -203,10 +316,16 @@ def decode_mono(path, ffmpeg_hint=''):
                 a.byteswap()
             return a, SR
         log('ffmpeg could not read the audio:', proc.stderr.decode('utf-8', 'replace')[:300])
+    # No ffmpeg — fall back to the built-in WAV reader
     if path.lower().endswith(('.wav', '.wave')):
         return read_wav(path)
-    raise Abort('Detecting BPM from "%s" needs ffmpeg (or use a WAV, or type the BPM).'
-                % os.path.basename(path))
+    ext = os.path.splitext(path)[1].lower() or '(no extension)'
+    raise Abort(
+        'Detecting BPM from "%s" (%s) needs ffmpeg.\n'
+        'Install ffmpeg and make sure it is on PATH, or set ffmpeg= in beat_mashup.cfg.\n'
+        'WAV files work without ffmpeg.'
+        % (os.path.basename(path), ext)
+    )
 
 
 def read_wav(path):
@@ -282,7 +401,7 @@ def onset_envelope(x, sr):
     # pure Python: energy flux on the full band, a crude high band and a crude low band
     n = len(x) // HOP
     if n < 64:
-            raise Abort('Audio is too short to detect tempo.')
+        raise Abort('Audio is too short to detect tempo.')
     full, high, lowe = [0.0] * n, [0.0] * n, [0.0] * n
     prev, lp = 0, 0.0
     k = 1.0 / 16  # one-pole low-pass, ~110 Hz at 11 kHz
@@ -414,6 +533,16 @@ class Analysis:
 
 
 # --------------------------------------------------------------------------- cut plan
+def _beat_weights(min_beats, max_beats):
+    """Equal-weight dict for every allowed beat count in [min_beats, max_beats].
+    Valid beat counts are 1, 2, 4 (the ones that divide a 4/4 bar evenly)."""
+    allowed = [L for L in (1, 2, 4) if min_beats <= L <= max_beats]
+    if not allowed:
+        # Clamp to nearest valid value
+        allowed = [min((1, 2, 4), key=lambda L: abs(L - min_beats))]
+    return {L: 1 for L in allowed}
+
+
 def plan_bounds(duration, bpm, first_beat, bar_shift, weights, rng, fps):
     """Cut times in seconds: 0, ..., duration. Every cut after the intro lands on a beat."""
     beat = 60.0 / bpm
@@ -442,6 +571,58 @@ def plan_bounds(duration, bpm, first_beat, bar_shift, weights, rng, fps):
     return bounds
 
 
+# --------------------------------------------------------------------------- transient snapping
+def snap_bounds_to_hits(bounds, analysis, bpm, threshold):
+    """Shift each cut boundary to the nearest loud transient within ±half a beat.
+
+    Parameters
+    ----------
+    bounds    : list of seconds (from plan_bounds) — modified in place and returned
+    analysis  : Analysis object (provides .nov, .efps, .latency)
+    bpm       : float
+    threshold : 0–1 fraction of the global peak; boundaries where no onset
+                exceeds this level are left unchanged
+
+    Returns
+    -------
+    (snapped_bounds, n_snapped) – list of floats and count of moved boundaries
+    """
+    nov = analysis.nov
+    efps = analysis.efps
+    half_beat_frames = (60.0 / bpm / 2.0) * efps  # half-beat window in envelope frames
+
+    # Global peak for threshold normalisation (ignore first and last frame)
+    peak = max(nov[1:-1]) if len(nov) > 2 else 1.0
+    if peak <= 0:
+        return bounds, 0
+
+    abs_threshold = threshold * peak
+    n_snapped = 0
+
+    out = [bounds[0]]  # index 0 (t=0) is never moved
+    for t in bounds[1:]:
+        center = t * efps  # position in envelope frames
+        lo = max(0, int(center - half_beat_frames))
+        hi = min(len(nov) - 1, int(center + half_beat_frames) + 1)
+
+        # Find the loudest onset in the window
+        best_idx, best_val = lo, nov[lo]
+        for idx in range(lo + 1, hi + 1):
+            if nov[idx] > best_val:
+                best_val, best_idx = nov[idx], idx
+
+        if best_val >= abs_threshold:
+            new_t = best_idx / efps
+            if abs(new_t - t) > 1e-4:   # only count as snapped if it actually moved
+                n_snapped += 1
+            out.append(new_t)
+        else:
+            out.append(t)
+
+    return out, n_snapped
+
+
+# --------------------------------------------------------------------------- clip picking
 def pick_clip(clips, need_tl, tl_fps, prev_uid, rng):
     def need_src(c):
         return max(1, int(round(need_tl * (c.fps or tl_fps) / tl_fps)))
@@ -491,17 +672,16 @@ def get_ui(resolve):
 
 def ask_options(ui, disp, cfg, info):
     """Returns updated cfg, or None if cancelled."""
-    w = cfg['beat_weights']
 
     def row(label, widget):
         return ui.HGroup({'Weight': 0}, [ui.Label({'Text': label, 'Weight': 0.55}), widget])
 
-    win = disp.AddWindow({'ID': 'BeatMashup', 'WindowTitle': 'Beat mashup', 'Geometry': [300, 200, 430, 470]}, [
+    win = disp.AddWindow({'ID': 'BeatMashup', 'WindowTitle': 'Beat mashup', 'Geometry': [300, 200, 430, 500]}, [
         ui.VGroup({'Spacing': 6}, [
             ui.Label({'Text': info, 'WordWrap': True, 'Weight': 0}),
             ui.VGap(4),
             row('BPM (0 = detect)', ui.DoubleSpinBox({'ID': 'bpm', 'Minimum': 0, 'Maximum': 400, 'Decimals': 2,
-                                                         'Value': float(cfg['bpm'] or 0), 'Weight': 0.45})),
+                                                      'Value': float(cfg['bpm'] or 0), 'Weight': 0.45})),
             row('First beat in s (-1 = detect)', ui.DoubleSpinBox({
                 'ID': 'first', 'Minimum': -1, 'Maximum': 60, 'Decimals': 3, 'SingleStep': 0.01,
                 'Value': -1.0 if cfg['first_beat'] is None else float(cfg['first_beat']), 'Weight': 0.45})),
@@ -509,16 +689,27 @@ def ask_options(ui, disp, cfg, info):
                 'ID': 'shift', 'Minimum': -1, 'Maximum': 3,
                 'Value': -1 if cfg['bar_shift'] is None else int(cfg['bar_shift']), 'Weight': 0.45})),
             row('Duration in s (0 = song)', ui.DoubleSpinBox({'ID': 'dur', 'Minimum': 0, 'Maximum': 36000,
-                                                                  'Decimals': 1, 'Value': float(cfg['duration'] or 0),
-                                                                  'Weight': 0.45})),
-            row('Weight of 1-beat cuts', ui.SpinBox({'ID': 'w1', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(1, 0)), 'Weight': 0.45})),
-            row('Weight of 2-beat cuts', ui.SpinBox({'ID': 'w2', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(2, 0)), 'Weight': 0.45})),
-            row('Weight of 4-beat cuts', ui.SpinBox({'ID': 'w4', 'Minimum': 0, 'Maximum': 100, 'Value': int(w.get(4, 0)), 'Weight': 0.45})),
-            row('Seed (empty = random)', ui.LineEdit({'ID': 'seed', 'Text': '' if cfg['seed'] is None else str(cfg['seed']), 'Weight': 0.45})),
-            row('Marker every N bars', ui.SpinBox({'ID': 'marks', 'Minimum': 0, 'Maximum': 64, 'Value': int(cfg['markers_every_bars']), 'Weight': 0.45})),
+                                                              'Decimals': 1, 'Value': float(cfg['duration'] or 0),
+                                                              'Weight': 0.45})),
+            row('Min beats per cut (1/2/4)', ui.SpinBox({'ID': 'minb', 'Minimum': 1, 'Maximum': 4,
+                                                         'Value': int(cfg['min_beats']), 'Weight': 0.45})),
+            row('Max beats per cut (1/2/4)', ui.SpinBox({'ID': 'maxb', 'Minimum': 1, 'Maximum': 4,
+                                                         'Value': int(cfg['max_beats']), 'Weight': 0.45})),
+            ui.CheckBox({'ID': 'snap', 'Text': 'Snap cuts to loudest hits (snares/claps)',
+                         'Checked': bool(cfg['snap_to_hits']), 'Weight': 0}),
+            row('Hit threshold (0–1)', ui.DoubleSpinBox({'ID': 'thresh', 'Minimum': 0.0, 'Maximum': 1.0,
+                                                         'Decimals': 2, 'SingleStep': 0.05,
+                                                         'Value': float(cfg['hit_threshold']), 'Weight': 0.45})),
+            row('Seed (empty = random)', ui.LineEdit({'ID': 'seed',
+                                                      'Text': '' if cfg['seed'] is None else str(cfg['seed']),
+                                                      'Weight': 0.45})),
+            row('Marker every N bars', ui.SpinBox({'ID': 'marks', 'Minimum': 0, 'Maximum': 64,
+                                                   'Value': int(cfg['markers_every_bars']), 'Weight': 0.45})),
             row('Timeline', ui.LineEdit({'ID': 'name', 'Text': cfg['timeline_name'], 'Weight': 0.45})),
-            ui.CheckBox({'ID': 'reuse', 'Text': 'Avoid repeating the same stretch of a video', 'Checked': bool(cfg['avoid_reuse']), 'Weight': 0}),
-            ui.Label({'Text': 'Only V1 and A1 are rebuilt. Put your FX on V2 or above.', 'WordWrap': True, 'Weight': 0}),
+            ui.CheckBox({'ID': 'reuse', 'Text': 'Avoid repeating the same stretch of a video',
+                         'Checked': bool(cfg['avoid_reuse']), 'Weight': 0}),
+            ui.Label({'Text': 'Only V1 and A1 are rebuilt. Put your FX on V2 or above.',
+                      'WordWrap': True, 'Weight': 0}),
             ui.HGroup({'Weight': 0}, [ui.Button({'ID': 'cancel', 'Text': 'Cancel'}),
                                       ui.Button({'ID': 'ok', 'Text': 'Generate', 'Default': True})]),
         ]),
@@ -545,7 +736,10 @@ def ask_options(ui, disp, cfg, info):
     shift = int(items['shift'].Value)
     out['bar_shift'] = None if shift < 0 else shift
     out['duration'] = float(items['dur'].Value)
-    out['beat_weights'] = {1: int(items['w1'].Value), 2: int(items['w2'].Value), 4: int(items['w4'].Value)}
+    out['min_beats'] = int(items['minb'].Value)
+    out['max_beats'] = int(items['maxb'].Value)
+    out['snap_to_hits'] = bool(items['snap'].Checked)
+    out['hit_threshold'] = float(items['thresh'].Value)
     seed = str(items['seed'].Text).strip()
     out['seed'] = int(seed) if seed.lstrip('-').isdigit() else (seed or None)
     out['markers_every_bars'] = int(items['marks'].Value)
@@ -574,7 +768,9 @@ def show_message(ui, disp, title, text):
         if sys.platform == 'darwin':
             safe_text = str(text).replace('\\', '\\\\').replace('"', '\\"')
             safe_title = str(title).replace('\\', '\\\\').replace('"', '\\"')
-            subprocess.run(['osascript', '-e', f'display dialog "{safe_text}" with title "{safe_title}" buttons {{"OK"}} default button "OK"'], check=False)
+            subprocess.run(['osascript', '-e',
+                            f'display dialog "{safe_text}" with title "{safe_title}" buttons {{"OK"}} default button "OK"'],
+                           check=False)
         elif sys.platform.startswith('win'):
             import ctypes
             ctypes.windll.user32.MessageBoxW(0, str(text), str(title), 0)
@@ -610,7 +806,10 @@ def build(resolve, cfg, ui=None, disp=None):
     if not videos:
         raise Abort('No videos in Media Pool bin "%s". Open the bin with your clips and run again.'
                     % folder_name)
-    if not any(w > 0 for w in cfg['beat_weights'].values()):
+
+    # Build beat_weights from min/max range
+    weights = _beat_weights(cfg.get('min_beats', 1), cfg.get('max_beats', 4))
+    if not any(w > 0 for w in weights.values()):
         raise Abort('All cut weights are 0.')
 
     # ---- tempo
@@ -672,7 +871,14 @@ def build(resolve, cfg, ui=None, disp=None):
 
     seed = cfg['seed'] if cfg['seed'] is not None else random.randrange(1, 10 ** 6)
     rng = random.Random(seed)
-    bounds = plan_bounds(duration, bpm, first_beat, bar_shift, cfg['beat_weights'], rng, fps)
+    bounds = plan_bounds(duration, bpm, first_beat, bar_shift, weights, rng, fps)
+
+    # ---- optional transient snapping
+    snap_count = 0
+    if cfg.get('snap_to_hits') and analysis is not None:
+        bounds, snap_count = snap_bounds_to_hits(bounds, analysis, bpm, cfg.get('hit_threshold', 0.35))
+        log('snapped %d/%d boundaries to nearby hits' % (snap_count, max(0, len(bounds) - 1)))
+
     grid = [int(round(b * fps)) for b in bounds]
     log('%.2f BPM, first beat %.3f s, bar shift %d, %d cuts, %.1f s, seed %s'
         % (bpm, first_beat, bar_shift, len(bounds) - 1, duration, seed))
@@ -721,8 +927,9 @@ def build(resolve, cfg, ui=None, disp=None):
             log('%d cuts...' % placed)
 
     # ---- markers
-    info_note = '%.2f BPM · first beat %.3f s · bar +%d · seed %s · %d cuts' % (
-        bpm, first_beat, bar_shift, seed, placed)
+    snap_note = (', %d hits snapped' % snap_count) if snap_count else ''
+    info_note = '%.2f BPM · first beat %.3f s · bar +%d · seed %s · %d cuts%s' % (
+        bpm, first_beat, bar_shift, seed, placed, snap_note)
     tl.AddMarker(0, 'Cream', 'Beat mashup', info_note, 1, TAG + ':info')
     every = int(cfg['markers_every_bars'] or 0)
     if every > 0:
@@ -738,8 +945,12 @@ def build(resolve, cfg, ui=None, disp=None):
                 bar += 1
             k += 1
 
-    msg = ('%d cuts at %.2f BPM on "%s" (seed %s, %.1f s).\nYour FX on V2+ were kept.'
-           % (placed, bpm, name, seed, time.time() - t0))
+    min_b = cfg.get('min_beats', 1)
+    max_b = cfg.get('max_beats', 4)
+    beat_desc = ('%d-%d beats' % (min_b, max_b)) if min_b != max_b else ('%d beats' % min_b)
+    msg = ('%d cuts at %.2f BPM (%s) on "%s" (seed %s, %.1f s).%s\nYour FX on V2+ were kept.'
+           % (placed, bpm, beat_desc, name, seed, time.time() - t0,
+              ('\n%d cuts snapped to hits.' % snap_count) if snap_count else ''))
     log(msg.replace('\n', ' '))
     return {'timeline': tl, 'bpm': bpm, 'first_beat': first_beat, 'bar_shift': bar_shift, 'seed': seed,
             'cuts': placed, 'grid': grid, 'start': start, 'fps': fps, 'message': msg}
@@ -749,11 +960,13 @@ def main():
     resolve = get_resolve()
     if resolve is None:
         log('Cannot find Resolve. Run this from Workspace > Scripts inside DaVinci Resolve.')
-        show_message(None, None, 'Beat mashup', 'Cannot find Resolve. Run this from Workspace > Scripts inside DaVinci Resolve.')
+        show_message(None, None, 'Beat mashup',
+                     'Cannot find Resolve. Run this from Workspace > Scripts inside DaVinci Resolve.')
         return
-    ui, disp = get_ui(resolve) if CONFIG.get('show_dialog') else (None, None)
+    cfg = load_config(dict(CONFIG))
+    ui, disp = get_ui(resolve) if cfg.get('show_dialog') else (None, None)
     try:
-        res = build(resolve, dict(CONFIG), ui, disp)
+        res = build(resolve, cfg, ui, disp)
         if res:
             show_message(ui, disp, 'Beat mashup', res['message'])
     except Abort as e:

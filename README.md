@@ -93,14 +93,14 @@ cd path\to\davinci-resolve-scripts
 python tools\install.py
 ```
 
-**macOS (Terminal)** — from the root of this repository:
+**macOS or Linux (Terminal)** — from the root of this repository:
 
 ```sh
 cd /path/to/davinci-resolve-scripts
 python3 tools/install.py
 ```
 
-Installer flags (on macOS use `python3` if `python` is missing):
+Installer flags (on macOS or Linux use `python3` if `python` is missing):
 
 ```sh
 python tools/install.py --list        # print what would be copied; write nothing
